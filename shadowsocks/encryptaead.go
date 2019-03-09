@@ -109,18 +109,17 @@ func (c *CipherAead) initDecrypt(salt []byte) (err error) {
 
 var _zerononce [128]byte // read-only. 128 bytes is more than enough.
 
-func (c *CipherAead) encrypt(src []byte) (dst []byte) {
-	dst = c.enc.Seal(nil, _zerononce[:c.enc.NonceSize()], src, nil)
-	return
+func (c *CipherAead) encrypt(dst, src []byte) ([]byte, error) {
+	b := c.enc.Seal(dst[c.info.keySize:c.info.keySize], _zerononce[:c.enc.NonceSize()], src, nil)
+	return dst[:c.info.keySize+len(b)], nil
 }
 
-func (c *CipherAead) decrypt(src []byte) (dst []byte) {
-	var err error
-	dst, err = c.dec.Open(nil, _zerononce[:c.dec.NonceSize()], src, nil)
+func (c *CipherAead) decrypt(dst, src []byte) ([]byte, error) {
+	b, err := c.dec.Open(dst[:0], _zerononce[:c.dec.NonceSize()], src[c.info.keySize:], nil)
 	if err != nil {
 		panic(err)
 	}
-	return
+	return b, err
 }
 
 func hkdfSHA1(secret, salt, info, outkey []byte) {
@@ -128,4 +127,11 @@ func hkdfSHA1(secret, salt, info, outkey []byte) {
 	if _, err := io.ReadFull(r, outkey); err != nil {
 		panic(err) // should never happen
 	}
+}
+
+func (c *CipherAead) Copy() *CipherAead {
+	nc := *c
+	nc.enc = nil
+	nc.dec = nil
+	return &nc
 }

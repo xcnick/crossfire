@@ -5,8 +5,9 @@ import "testing"
 const textAead = "Don't tell me the moon is shining; show me the glint of light on broken glass."
 
 func testCipherAead(t *testing.T, c *CipherAead, msg string) {
-	cipherBuf := c.encrypt([]byte(textAead))
-	originTxt := c.decrypt(cipherBuf)
+	cipherBuf := make([]byte, 64*1024)
+	encryBuf, _ := c.encrypt(cipherBuf, []byte(textAead))
+	originTxt, _ := c.decrypt(cipherBuf[c.info.keySize:], encryBuf)
 
 	if string(originTxt) != textAead {
 		t.Error(msg, " encrypt then decrypt does not get original text")

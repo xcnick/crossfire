@@ -29,6 +29,13 @@ const (
 	socksCmdConnect = 1
 )
 
+type ServerCipher struct {
+	server string
+	cipher *ss.CipherAead
+}
+
+var server *ServerCipher
+
 func handShake(conn net.Conn) (err error) {
 	const (
 		idVer     = 0
@@ -38,7 +45,7 @@ func handShake(conn net.Conn) (err error) {
 	buf := make([]byte, 258)
 
 	var n int
-	// ss.SetReadTimeout(conn)
+	ss.SetReadTimeout(conn)
 	// 读取前面两个字节，ver + idNmethod
 	if n, err = io.ReadAtLeast(conn, buf, idNmethod+1); err != nil {
 		return
@@ -90,13 +97,13 @@ func getRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 	// 理论上协议最大长度+1
 	buf := make([]byte, 263)
 	var n int
-	// ss.SetReadtimeout(conn)
+	ss.SetReadTimeout(conn)
 	// 至少读取5个字节，即使时域名，也读取到了域名的长度
 	if n, err = io.ReadAtLeast(conn, buf, idDmLen+1); err != nil {
 		return
 	}
 	// 检验协议头
-	if buf[idVer] != socksCmdConnect {
+	if buf[idVer] != socksVer5 {
 		err = errVer
 		return
 	}
@@ -155,6 +162,16 @@ func getRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 	return
 }
 
+func connectToServer(rawaddr []byte, addr string) (remote *ss.StreamConn, err error) {
+	remote, err = ss.DialWithRawAddr(rawaddr, server.server, server.cipher.Copy())
+	if err != nil {
+		log.Println("error connecting to shadowsocks server:", err)
+		return nil, err
+	}
+	debug.Printf("connected to %s via %s\n", addr, server.server)
+	return
+}
+
 func handleConnection(conn net.Conn) {
 	if debug {
 		debug.Printf("socks connect from %s\n", conn.RemoteAddr().String())
@@ -189,6 +206,22 @@ func handleConnection(conn net.Conn) {
 	}
 
 	// 传入要访问的真实地址，比如google.com
+	remote, err := connectToServer(rawaddr, addr)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if !closed {
+			remote.Close()
+		}
+	}()
+
+	// 将收到的client数据加密后转发给ss-server(remote)
+	go ss.PipeThenClose(conn, remote, nil)
+	// 将收到的ss-server数据解密后转发给client
+	ss.PipeThenClose(remote, conn, nil)
+	closed = true
+	debug.Println("close connection to", addr)
 }
 
 func run(listenAddr string) {
@@ -210,6 +243,7 @@ func run(listenAddr string) {
 func main() {
 	log.SetOutput(os.Stdout)
 
+	var configFile string
 	var cmdConfig ss.Config
 	var printVer bool
 	var core int
@@ -219,10 +253,9 @@ func main() {
 	flag.StringVar(&cmdConfig.Password, "k", "", "password")
 	flag.IntVar(&cmdConfig.ServerPort, "p", 0, "server port")
 	flag.IntVar(&cmdConfig.Timeout, "t", 300, "timeout in seconds")
-	flag.StringVar(&cmdConfig.Method, "m", "", "encryption method, default: aes-256-cfb")
+	flag.StringVar(&cmdConfig.Method, "m", "", "encryption method, default: aes-128-gcm")
 	flag.IntVar(&core, "core", 0, "maximum number of CPU cores to use, default is determinied by Go runtime")
 	flag.BoolVar((*bool)(&debug), "d", false, "print debug message")
-	flag.BoolVar(&udp, "u", false, "UDP Relay")
 	flag.Parse()
 
 	if printVer {
@@ -232,8 +265,7 @@ func main() {
 
 	ss.SetDebug(debug)
 
-	var err error
-	config, err = ss.ParseConfig(configFile)
+	config, err := ss.ParseConfig(configFile)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "error reading %s: %v\n", configFile, err)
@@ -257,11 +289,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// go run(port, password)
-	// if udp {
-	// 	go runUDP(port, password)
-	// }
-
-	// waitSignal()
-	//run()
+	cipher, err := ss.NewCipherAead(config.Method, config.Password)
+	if err != nil {
+		log.Fatal("Failed generating ciphers:", err)
+	}
+	server = &ServerCipher{net.JoinHostPort(config.Server, strconv.Itoa(config.ServerPort)), cipher}
+	run(config.LocalAddress + ":" + strconv.Itoa(config.LocalPort))
 }
