@@ -38,3 +38,6 @@
 
 # OSX dir files
 .DS_Store
+
+# windows exe
+*.exe

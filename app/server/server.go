@@ -104,6 +104,7 @@ func handleConnection(conn *ss.StreamConn, port string) {
 	if err != nil {
 		log.Println("error getting request", conn.RemoteAddr(), conn.LocalAddr(), err)
 		closed = true
+		return
 	}
 
 	if strings.ContainsRune(host, 0x00) {
@@ -169,7 +170,7 @@ func run(port, password string) {
 				continue
 			}
 		}
-		go handleConnection(ss.NewConn(conn, cipher.Copy()), port)
+		go handleConnection(ss.NewStreamConn(conn, cipher.Copy()), port)
 	}
 }
 
@@ -188,7 +189,7 @@ func main() {
 	flag.StringVar(&cmdConfig.Password, "k", "", "password")
 	flag.IntVar(&cmdConfig.ServerPort, "p", 0, "server port")
 	flag.IntVar(&cmdConfig.Timeout, "t", 300, "timeout in seconds")
-	flag.StringVar(&cmdConfig.Method, "m", "", "encryption method, default: aes-256-cfb")
+	flag.StringVar(&cmdConfig.Method, "m", "", "encryption method, default: aes-128-gcm")
 	flag.IntVar(&core, "core", 0, "maximum number of CPU cores to use, default is determinied by Go runtime")
 	flag.BoolVar((*bool)(&debug), "d", false, "print debug message")
 	flag.BoolVar(&udp, "u", false, "UDP Relay")

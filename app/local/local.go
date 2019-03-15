@@ -46,6 +46,11 @@ func handShake(conn net.Conn) (err error) {
 
 	var n int
 	ss.SetReadTimeout(conn)
+	// +----+----------+----------+
+	// |VER | NMETHODS | METHODS  |
+	// +----+----------+----------+
+	// | 1  |    1     |  1~255   |
+	// +----+----------+----------+
 	// 读取前面两个字节，ver + idNmethod
 	if n, err = io.ReadAtLeast(conn, buf, idNmethod+1); err != nil {
 		return
@@ -69,6 +74,11 @@ func handShake(conn net.Conn) (err error) {
 		return errAuthExtraData
 	}
 
+	// +----+--------+
+	// |VER | METHOD |
+	// +----+--------+
+	// | 1  |   1    |
+	// +----+--------+
 	// 回复浏览器，返回两个字节，1.协议版本号 2.无需认证标识0
 	_, err = conn.Write([]byte{socksVer5, 0})
 	return
@@ -93,7 +103,12 @@ func getRequest(conn net.Conn) (rawaddr []byte, host string, err error) {
 		lenIPv6   = 3 + 1 + net.IPv6len + 2
 		lenDmBase = 3 + 1 + 1 + 2
 	)
-
+	// 浏览器向sslocal发出请求
+	// +----+-----+-------+------+----------+----------+
+	// |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+	// +----+-----+-------+------+----------+----------+
+	// | 1  |  1  |   1   |  1   | Variable |    2     |
+	// +----+-----+-------+------+----------+----------+
 	// 理论上协议最大长度+1
 	buf := make([]byte, 263)
 	var n int
@@ -198,6 +213,14 @@ func handleConnection(conn net.Conn) {
 		log.Println("error getting request:", err)
 		return
 	}
+	// +----+-----+-------+------+----------+----------+
+	// |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+	// +----+-----+-------+------+----------+----------+
+	// | 1  |  1  |   1   |  1   | Variable |    2     |
+	// +----+-----+-------+------+----------+----------+
+	// 需要注意的是，当请求中的 CMD == 0x01 时，绝大部分 SOCKS5 客户端的实现都会忽略
+	// SOCKS5 服务器返回的 BND.ADDR 和 BND.PORT 字段
+	// 所以0x00, 0x00, 0x00, 0x00, 0x08, 0x43代表无意义的地址和端口
 	// 给浏览器的响应
 	_, err = conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43})
 	if err != nil {

@@ -137,3 +137,11 @@ func benchmarkCipherEncrypt(b *testing.B, method string) {
 func BenchmarkAES128CFBEncrypt(b *testing.B) {
 	benchmarkCipherEncrypt(b, "aes-128-cfb")
 }
+
+func BenchmarkAES256CFBEncrypt(b *testing.B) {
+	benchmarkCipherEncrypt(b, "aes-256-cfb")
+}
+
+func BenchmarkRC4MD5Encrypt(b *testing.B) {
+	benchmarkCipherEncrypt(b, "rc4-md5")
+}

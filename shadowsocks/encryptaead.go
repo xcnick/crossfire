@@ -84,18 +84,13 @@ func NewCipherAead(method, password string) (c *CipherAead, err error) {
 }
 
 func (c *CipherAead) initEncrypt() (salt []byte, err error) {
-	if c.salt == nil {
-		salt = make([]byte, c.info.keySize)
-		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-			return nil, err
-		}
-		c.salt = salt
-	} else {
-		salt = c.salt
+	c.salt = make([]byte, c.info.keySize)
+	if _, err := io.ReadFull(rand.Reader, c.salt); err != nil {
+		return nil, err
 	}
 
 	subkey := make([]byte, c.info.keySize)
-	hkdfSHA1(c.key, salt, []byte("ss-subkey"), subkey)
+	hkdfSHA1(c.key, c.salt, []byte("ss-subkey"), subkey)
 	c.enc, err = c.info.newAead(subkey)
 	return
 }
