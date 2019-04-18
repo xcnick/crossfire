@@ -19,10 +19,11 @@ type cipherAeadInfo struct {
 }
 
 var cipherAeadMethod = map[string]*cipherAeadInfo{
-	"aes-128-gcm":            {16, newAESGCMAead},
-	"aes-192-gcm":            {24, newAESGCMAead},
-	"aes-256-gcm":            {32, newAESGCMAead},
-	"chacha20-ietf-poly1305": {32, newChaCha20Aead},
+	"aes-128-gcm":             {16, newAESGCMAead},
+	"aes-192-gcm":             {24, newAESGCMAead},
+	"aes-256-gcm":             {32, newAESGCMAead},
+	"chacha20-ietf-poly1305":  {32, newChaCha20Aead},
+	"xchacha20-ietf-poly1305": {32, newXChaCha20Aead},
 }
 
 type CipherAead struct {
@@ -63,6 +64,13 @@ func newChaCha20Aead(key []byte) (cipher.AEAD, error) {
 		return nil, KeySizeError(chacha20poly1305.KeySize)
 	}
 	return chacha20poly1305.New(key)
+}
+
+func newXChaCha20Aead(key []byte) (cipher.AEAD, error) {
+	if len(key) != chacha20poly1305.KeySize {
+		return nil, KeySizeError(chacha20poly1305.KeySize)
+	}
+	return chacha20poly1305.NewX(key)
 }
 
 func NewCipherAead(method, password string) (c *CipherAead, err error) {

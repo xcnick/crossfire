@@ -48,6 +48,10 @@ func TestChaCha20Aead(t *testing.T) {
 	testBlockCipherAead(t, "chacha20-ietf-poly1305")
 }
 
+func TestXChaCha20Aead(t *testing.T) {
+	testBlockCipherAead(t, "xchacha20-ietf-poly1305")
+}
+
 func benchmarkBlockCipherAead(b *testing.B, method string) {
 	var cipher *CipherAead
 	var err error
@@ -72,6 +76,10 @@ func benchmarkBlockCipherAead(b *testing.B, method string) {
 
 func BenchmarkChaCha20Aead(b *testing.B) {
 	benchmarkBlockCipherAead(b, "chacha20-ietf-poly1305")
+}
+
+func BenchmarkXChaCha20Aead(b *testing.B) {
+	benchmarkBlockCipherAead(b, "xchacha20-ietf-poly1305")
 }
 
 func BenchmarkAES128GCMAead(b *testing.B) {

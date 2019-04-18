@@ -4,16 +4,18 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"sync"
 )
 
 // payloadSizeMask is the maximum size of payload in bytes.
 const payloadSizeMask = 0x3FFF // 16*1024 - 1
+const bufSize = 17 * 1024
+
+var bufPool = sync.Pool{New: func() interface{} { return make([]byte, bufSize) }}
 
 type StreamConn struct {
 	net.Conn
 	*CipherAead
-	readBuf  []byte
-	writeBuf []byte
 	rnonce   []byte
 	wnonce   []byte
 	leftover []byte
@@ -75,27 +77,27 @@ func (c *StreamConn) Write(b []byte) (n int, err error) {
 			return 0, err
 		}
 		c.wnonce = make([]byte, c.enc.NonceSize())
-		c.writeBuf = make([]byte, 2+c.enc.Overhead()+payloadSizeMask+c.enc.Overhead())
 	}
 
+	writeBuf := bufPool.Get().([]byte)
+	defer bufPool.Put(writeBuf)
 	r := io.Reader(bytes.NewBuffer(b))
 	for {
-		cipherData := c.writeBuf
-		payloadBuf := cipherData[2+c.enc.Overhead() : 2+c.enc.Overhead()+payloadSizeMask]
+		payloadBuf := writeBuf[2+c.enc.Overhead() : 2+c.enc.Overhead()+payloadSizeMask]
 		nr, er := r.Read(payloadBuf)
 
 		if nr > 0 {
 			n += nr
-			cipherData = cipherData[:2+c.enc.Overhead()+nr+c.enc.Overhead()]
+			writeBuf = writeBuf[:2+c.enc.Overhead()+nr+c.enc.Overhead()]
 			payloadBuf = payloadBuf[:nr]
-			cipherData[0], cipherData[1] = byte(nr>>8), byte(nr) // big-endian payload size
-			c.enc.Seal(cipherData[:0], c.wnonce, cipherData[:2], nil)
+			writeBuf[0], writeBuf[1] = byte(nr>>8), byte(nr) // big-endian payload size
+			c.enc.Seal(writeBuf[:0], c.wnonce, writeBuf[:2], nil)
 			increment(c.wnonce)
 
 			c.enc.Seal(payloadBuf[:0], c.wnonce, payloadBuf, nil)
 			increment(c.wnonce)
 
-			_, ew := c.Conn.Write(cipherData)
+			_, ew := c.Conn.Write(writeBuf)
 			if ew != nil {
 				err = ew
 				return
@@ -122,16 +124,16 @@ func (c *StreamConn) Read(b []byte) (n int, err error) {
 			return 0, err
 		}
 		c.rnonce = make([]byte, c.dec.NonceSize())
-		c.readBuf = make([]byte, payloadSizeMask+c.dec.Overhead())
 	}
-
+	readBuf := bufPool.Get().([]byte)
+	defer bufPool.Put(readBuf)
 	if len(c.leftover) > 0 {
 		n = copy(b, c.leftover)
 		c.leftover = c.leftover[n:]
 		return n, nil
 	}
 
-	cipherData := c.readBuf[:2+c.dec.Overhead()]
+	cipherData := readBuf[:2+c.dec.Overhead()]
 	_, err = io.ReadFull(c.Conn, cipherData)
 	if err != nil {
 		return 0, err
@@ -144,7 +146,7 @@ func (c *StreamConn) Read(b []byte) (n int, err error) {
 
 	size := (int(cipherData[0])<<8 + int(cipherData[1])) & payloadSizeMask
 	// decrypt payload
-	cipherData = c.readBuf[:size+c.dec.Overhead()]
+	cipherData = readBuf[:size+c.dec.Overhead()]
 	_, err = io.ReadFull(c.Conn, cipherData)
 	if err != nil {
 		return 0, err
@@ -156,9 +158,9 @@ func (c *StreamConn) Read(b []byte) (n int, err error) {
 		return 0, err
 	}
 
-	n = copy(b, c.readBuf[:size])
+	n = copy(b, readBuf[:size])
 	if n < size {
-		c.leftover = c.readBuf[n:size]
+		c.leftover = readBuf[n:size]
 	}
 
 	return n, err
