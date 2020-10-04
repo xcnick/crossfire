@@ -10,8 +10,9 @@ import (
 	"net"
 	"os"
 	"runtime"
-	ss "shadowsocks-lite/shadowsocks"
 	"strconv"
+
+	ss "crossfire/proxy/shadowsocks"
 )
 
 var debug ss.DebugLog

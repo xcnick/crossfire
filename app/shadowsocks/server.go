@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	ss "shadowsocks-lite/shadowsocks"
+	ss "crossfire/proxy/shadowsocks"
 )
 
 const (
