@@ -2,7 +2,6 @@ package tls
 
 import (
 	stdtls "crypto/tls"
-	"io"
 	"net"
 	"net/url"
 	"strings"
@@ -43,7 +42,7 @@ func (c *Client) Name() string { return c.name }
 
 func (c *Client) Addr() string { return c.addr }
 
-func (c *Client) Handshake(underlay net.Conn, target string) (io.ReadWriter, error) {
+func (c *Client) Handshake(underlay net.Conn, target string) (proxy.StreamConn, error) {
 	cc := stdtls.Client(underlay, c.tlsConfig)
 	err := cc.Handshake()
 	if err != nil {
@@ -51,4 +50,8 @@ func (c *Client) Handshake(underlay net.Conn, target string) (io.ReadWriter, err
 	}
 
 	return c.inner.Handshake(cc, target)
+}
+
+func (c *Client) Pack(underlay net.Conn) (proxy.PacketConn, error) {
+	return c.inner.Pack(underlay)
 }

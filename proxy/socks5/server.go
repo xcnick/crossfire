@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/url"
 	"time"
@@ -41,7 +42,7 @@ func (s *Server) Name() string { return Name }
 
 func (s *Server) Addr() string { return s.addr }
 
-func (s *Server) Handshake(underlay net.Conn) (io.ReadWriter, *proxy.TargetAddr, error) {
+func (s *Server) Handshake(underlay net.Conn) (proxy.StreamConn, *proxy.TargetAddr, error) {
 	// Set handshake timeout 4 seconds
 	if err := underlay.SetReadDeadline(time.Now().Add(time.Second * 4)); err != nil {
 		return nil, nil, err
@@ -49,64 +50,59 @@ func (s *Server) Handshake(underlay net.Conn) (io.ReadWriter, *proxy.TargetAddr,
 	defer underlay.SetReadDeadline(time.Time{})
 
 	// https://www.ietf.org/rfc/rfc1928.txt
-	buf := common.GetBuffer(512)
-	defer common.PutBuffer(buf)
+	reqOneByte := common.GetBuffer(1)
+	defer common.PutBuffer(reqOneByte)
 
-	// Read hello message
-	n, err := underlay.Read(buf)
-	if err != nil || n == 0 {
-		return nil, nil, fmt.Errorf("failed to read hello: %w", err)
+	if _, err := io.ReadFull(underlay, reqOneByte); err != nil {
+		return nil, nil, fmt.Errorf("failed to read socks version:%v", err)
 	}
-	version := buf[0]
-	if version != Version5 {
-		return nil, nil, fmt.Errorf("unsupported socks version %v", version)
+	if reqOneByte[0] != Version5 {
+		return nil, nil, fmt.Errorf("invalid socks version:%v", reqOneByte[0])
 	}
 
-	// Write hello response
-	// TODO: Support Auth
-	_, err = underlay.Write([]byte{Version5, AuthNone})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to write hello response: %w", err)
+	if _, err := io.ReadFull(underlay, reqOneByte); err != nil {
+		return nil, nil, fmt.Errorf("failed to read NMETHODS")
+	}
+	if _, err := io.CopyN(ioutil.Discard, underlay, int64(reqOneByte[0])); err != nil {
+		return nil, nil, fmt.Errorf("failed to read methods:%v", err)
+	}
+
+	if _, err := underlay.Write([]byte{Version5, AuthNone}); err != nil {
+		return nil, nil, fmt.Errorf("failed to write auth:%v", err)
 	}
 
 	// Read command message
-	n, err = underlay.Read(buf)
-	if err != nil || n < 7 { // Shortest length is 7
-		return nil, nil, fmt.Errorf("failed to read command: %w", err)
+	reqCmd := common.GetBuffer(3)
+	defer common.PutBuffer(reqCmd)
+
+	if _, err := io.ReadFull(underlay, reqCmd); err != nil {
+		return nil, nil, fmt.Errorf("failed to read command:%v", err)
 	}
-	cmd := buf[1]
+	cmd := reqCmd[1]
+
+	addr, _, err := ReadTargetAddr(underlay)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read address:%v", err)
+	}
+
 	if cmd != CmdConnect {
 		return nil, nil, fmt.Errorf("unsuppoted command %v", cmd)
 	}
-	addr := &proxy.TargetAddr{}
-	l := 2
-	off := 4
-	switch buf[3] {
-	case ATypIP4:
-		l += net.IPv4len
-		addr.IP = make(net.IP, net.IPv4len)
-	case ATypIP6:
-		l += net.IPv6len
-		addr.IP = make(net.IP, net.IPv6len)
-	case ATypDomain:
-		l += int(buf[4])
-		off = 5
+
+	switch cmd {
+	case CmdConnect:
+		_, err = underlay.Write([]byte{Version5, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+	case CmdUDPAssociate:
+		listenAddr := ParseAddr(underlay.LocalAddr().String())
+		_, err = underlay.Write(append([]byte{Version5, 0, 0}, listenAddr...))
+		// Keep the connection util timeout then the socket will be free
+		buf := common.GetBuffer(16)
+		defer common.PutBuffer(buf)
+		underlay.Read(buf)
 	default:
-		return nil, nil, fmt.Errorf("unknown address type %v", buf[3])
+		return nil, nil, fmt.Errorf("unsuppoted command %v", cmd)
 	}
 
-	if len(buf[off:]) < l {
-		return nil, nil, errors.New("short command request")
-	}
-	if addr.IP != nil {
-		copy(addr.IP, buf[off:])
-	} else {
-		addr.Name = string(buf[off : off+l-2])
-	}
-	addr.Port = int(buf[off+l-2])<<8 | int(buf[off+l-1])
-
-	// Write command response
-	_, err = underlay.Write([]byte{Version5, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to write command response: %w", err)
 	}
@@ -114,6 +110,6 @@ func (s *Server) Handshake(underlay net.Conn) (io.ReadWriter, *proxy.TargetAddr,
 	return underlay, addr, err
 }
 
-func (s *Server) Stop() {
-	// Nothing to stop or close
+func (s *Server) Pack(underlay net.Conn) (proxy.PacketConn, error) {
+	return nil, errors.New("implement me")
 }

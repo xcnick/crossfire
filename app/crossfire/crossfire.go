@@ -4,20 +4,15 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"runtime"
-	"strings"
 	"syscall"
-	"time"
 
 	"crossfire/common"
 	"crossfire/proxy"
-	"crossfire/proxy/direct"
 	_ "crossfire/proxy/socks5"
 	_ "crossfire/proxy/tls"
 	_ "crossfire/proxy/trojan"
@@ -87,97 +82,16 @@ func main() {
 		os.Exit(-1)
 	}
 
-	// 根据配置文件初始化组件
-	localServer, err := proxy.ServerFromURL(conf.Local)
+	// Proxy
+	proxy, err := proxy.NewProxy(conf.Local, conf.Remote, conf.Route)
 	if err != nil {
-		log.Printf("can not create local server: %v", err)
+		log.Printf("can not create proxy: %v", err)
 		os.Exit(-1)
 	}
-	defer localServer.Stop() // Server可能有一些定时任务，使用Stop关闭
-	remoteClient, err := proxy.ClientFromURL(conf.Remote)
-	if err != nil {
-		log.Printf("can not create remote client: %v", err)
+	if err = proxy.Execute(); err != nil {
+		log.Printf("can not run proxy: %v", err)
 		os.Exit(-1)
 	}
-	directClient, _ := proxy.ClientFromURL("direct://")
-	matcher := common.NewMather(conf.Route)
-
-	// 开启本地的TCP监听
-	listener, err := net.Listen("tcp", localServer.Addr())
-	if err != nil {
-		log.Printf("can not listen on %v: %v", localServer.Addr(), err)
-		os.Exit(-1)
-	}
-	log.Printf("%v listening TCP on %v", localServer.Name(), localServer.Addr())
-	go func() {
-		for {
-			lc, err := listener.Accept()
-			if err != nil {
-				errStr := err.Error()
-				if strings.Contains(errStr, "closed") {
-					break
-				}
-				log.Printf("failed to accepted connection: %v", err)
-				if strings.Contains(errStr, "too many") {
-					time.Sleep(time.Millisecond * 500)
-				}
-				continue
-			}
-			go func() {
-				defer lc.Close()
-				var client proxy.Client
-
-				// 不同的服务端协议各自实现自己的响应逻辑, 其中返回的地址则用于匹配路由
-				// 常常需要额外编解码或者流量统计的功能，故需要给lc包一层以实现这些逻辑，即wlc
-				wlc, targetAddr, err := localServer.Handshake(lc)
-				if err != nil {
-					log.Printf("failed in handshake from %v: %v", localServer.Addr(), err)
-					return
-				}
-
-				// 匹配路由
-				if conf.Route == whitelist { // 白名单模式，如果匹配，则直接访问，否则使用代理访问
-					if matcher.Check(targetAddr.Host()) {
-						client = directClient
-					} else {
-						client = remoteClient
-					}
-				} else if conf.Route == blacklist { // 黑名单模式，如果匹配，则使用代理访问，否则直接访问
-					if matcher.Check(targetAddr.Host()) {
-						client = remoteClient
-					} else {
-						client = directClient
-					}
-				} else { // 全部流量使用代理访问
-					client = remoteClient
-				}
-				log.Printf("%v to %v", client.Name(), targetAddr)
-
-				// 连接远端地址
-				dialAddr := remoteClient.Addr()
-				if _, ok := client.(*direct.Direct); ok { // 直接访问则直接连接目标地址
-					dialAddr = targetAddr.String()
-				}
-				rc, err := net.Dial("tcp", dialAddr)
-				if err != nil {
-					log.Printf("failed to dail to %v: %v", dialAddr, err)
-					return
-				}
-				defer rc.Close()
-
-				// 不同的客户端协议各自实现自己的请求逻辑
-				wrc, err := client.Handshake(rc, targetAddr.String())
-				if err != nil {
-					log.Printf("failed in handshake to %v: %v", dialAddr, err)
-					return
-				}
-
-				// 流量转发
-				go io.Copy(wrc, wlc)
-				io.Copy(wlc, wrc)
-			}()
-		}
-	}()
 
 	// 后台运行
 	{

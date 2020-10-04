@@ -1,8 +1,7 @@
 package trojan
 
 import (
-	"encoding/binary"
-	"io"
+	"errors"
 	"log"
 	"net"
 	"net/url"
@@ -36,7 +35,7 @@ func (c *Client) Name() string { return Name }
 
 func (c *Client) Addr() string { return c.addr }
 
-func (c *Client) Handshake(underlay net.Conn, target string) (io.ReadWriter, error) {
+func (c *Client) Handshake(underlay net.Conn, target string) (proxy.StreamConn, error) {
 	conn := &ClientConn{Conn: underlay, target: target, user: c.user}
 
 	// Request
@@ -46,6 +45,10 @@ func (c *Client) Handshake(underlay net.Conn, target string) (io.ReadWriter, err
 	}
 
 	return conn, nil
+}
+
+func (c *Client) Pack(underlay net.Conn) (proxy.PacketConn, error) {
+	return nil, errors.New("implement me")
 }
 
 type ClientConn struct {
@@ -66,16 +69,7 @@ func (c *ClientConn) Request() error {
 	buf.Write([]byte(c.user.Hex))
 	buf.Write(crlf)
 	buf.WriteByte(socks5.CmdConnect)
-	atyp, addr, port, err := ParseAddr(c.target)
-	if err != nil {
-		return err
-	}
-	buf.WriteByte(atyp)
-	buf.Write(addr)
-	err = binary.Write(buf, binary.BigEndian, port) // port
-	if err != nil {
-		return err
-	}
+	buf.Write(socks5.ParseAddr(c.target))
 	buf.Write(crlf)
 	n, err := c.Conn.Write(buf.Bytes())
 	c.sent += uint64(n)

@@ -4,7 +4,6 @@ import (
 	stdtls "crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/url"
@@ -15,7 +14,8 @@ import (
 )
 
 func init() {
-	proxy.RegisterServer("vmesss", NewTlsServer)
+	proxy.RegisterServer("vlesss", NewTlsServer)
+	proxy.RegisterServer("trojans", NewTlsServer)
 }
 
 func NewTlsServer(url *url.URL) (proxy.Server, error) {
@@ -64,7 +64,7 @@ func (s *Server) Name() string { return s.name }
 
 func (s *Server) Addr() string { return s.addr }
 
-func (s *Server) Handshake(underlay net.Conn) (io.ReadWriter, *proxy.TargetAddr, error) {
+func (s *Server) Handshake(underlay net.Conn) (proxy.StreamConn, *proxy.TargetAddr, error) {
 	tlsConn := stdtls.Server(underlay, s.tlsConfig)
 	err := tlsConn.Handshake()
 	if err != nil {
@@ -86,6 +86,6 @@ func (s *Server) Handshake(underlay net.Conn) (io.ReadWriter, *proxy.TargetAddr,
 	}
 }
 
-func (s *Server) Stop() {
-	s.inner.Stop()
+func (s *Server) Pack(underlay net.Conn) (proxy.PacketConn, error) {
+	return s.inner.Pack(underlay)
 }

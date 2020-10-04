@@ -8,6 +8,12 @@ const (
 	KiB = 1024
 	MiB = KiB * 1024
 	GiB = MiB * 1024
+
+	// TCPBufSize is the size of tcp buffer
+	TCPBufSize = 16 << 10
+
+	// UDPBufSize is the size of udp buffer, 2^16 = 65536
+	UDPBufSize = 64 << 10
 )
 
 func HumanFriendlyTraffic(bytes uint64) string {
